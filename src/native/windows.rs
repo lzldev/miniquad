@@ -1,4 +1,6 @@
-use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+use std::{
+    ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf, sync::atomic::Ordering::Relaxed,
+};
 
 use crate::{
     conf::{Conf, Icon},
@@ -10,13 +12,16 @@ use crate::{
 use winapi::{
     shared::{
         hidusage::{HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC},
-        minwindef::{DWORD, HIWORD, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM},
+        minwindef::{
+            BYTE, DWORD, HIWORD, HRGN, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM,
+        },
         ntdef::NULL,
-        windef::{HBRUSH, HCURSOR, HDC, HICON, HWND, POINT, RECT},
+        windef::{COLORREF, HBRUSH, HCURSOR, HDC, HICON, HWND, POINT, RECT},
         windowsx::{GET_X_LPARAM, GET_Y_LPARAM},
     },
     um::{
-        imm::{HIMC, ImmGetContext, ImmReleaseContext},
+        dwmapi::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND},
+        imm::{ImmGetContext, ImmReleaseContext, HIMC},
         libloaderapi::{GetModuleHandleW, GetProcAddress},
         shellapi::{DragAcceptFiles, DragQueryFileW, HDROP},
         shellscalingapi::*,
@@ -76,7 +81,12 @@ struct CANDIDATEFORM {
 // Link to imm32.dll for IME support
 #[link(name = "imm32")]
 extern "system" {
-    fn ImmGetCompositionStringW(himc: HIMC, index: DWORD, buf: *mut std::ffi::c_void, len: DWORD) -> i32;
+    fn ImmGetCompositionStringW(
+        himc: HIMC,
+        index: DWORD,
+        buf: *mut std::ffi::c_void,
+        len: DWORD,
+    ) -> i32;
     fn ImmAssociateContextEx(hwnd: HWND, himc: HIMC, flags: DWORD) -> i32;
     fn ImmAssociateContext(hwnd: HWND, himc: HIMC) -> HIMC;
     fn ImmCreateContext() -> HIMC;
@@ -118,6 +128,7 @@ pub(crate) struct WindowsDisplay {
     event_handler: Option<Box<dyn EventHandler>>,
     modal_resizing_timer: usize,
     update_requested: bool,
+    platform: crate::conf::Platform,
 }
 
 impl WindowsDisplay {
@@ -165,23 +176,23 @@ impl WindowsDisplay {
             ImmReleaseContext(self.wnd, himc);
         }
     }
-    
+
     /// Enable or disable IME for the window.
     /// When disabled, the IME will not process keyboard input, useful for game controls.
     fn set_ime_enabled(&mut self, enabled: bool) {
         unsafe {
             if enabled {
-                IME_USER_DISABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+                IME_USER_DISABLED.store(false, Relaxed);
                 // Re-associate IME context with the window
                 ImmAssociateContextEx(self.wnd, std::ptr::null_mut(), IACE_DEFAULT);
             } else {
-                IME_USER_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+                IME_USER_DISABLED.store(true, Relaxed);
                 // Disassociate IME context from the window
                 ImmAssociateContextEx(self.wnd, std::ptr::null_mut(), 0);
             }
         }
     }
-    
+
     fn set_mouse_cursor(&mut self, cursor_icon: CursorIcon) {
         let cursor_name = match cursor_icon {
             CursorIcon::Default => IDC_ARROW,
@@ -217,7 +228,7 @@ impl WindowsDisplay {
         rect.right = (rect.left + new_width as i32) as _;
         rect.top = (rect.bottom - new_height as i32) as _;
 
-        let win_style = get_win_style(self.fullscreen, self.window_resizable);
+        let win_style = get_win_style(self.fullscreen, self.window_resizable, &self.platform);
         let win_style_ex: DWORD = unsafe { GetWindowLongA(self.wnd, GWL_EXSTYLE) as _ };
         if unsafe {
             AdjustWindowRectEx(
@@ -268,7 +279,8 @@ impl WindowsDisplay {
     fn set_fullscreen(&mut self, fullscreen: bool) {
         self.fullscreen = fullscreen as _;
 
-        let win_style: DWORD = get_win_style(self.fullscreen, self.window_resizable);
+        let win_style: DWORD =
+            get_win_style(self.fullscreen, self.window_resizable, &self.platform);
 
         unsafe {
             #[cfg(target_arch = "x86_64")]
@@ -309,10 +321,18 @@ impl WindowsDisplay {
     }
 }
 
-fn get_win_style(is_fullscreen: bool, is_resizable: bool) -> DWORD {
+fn get_win_style(
+    is_fullscreen: bool,
+    is_resizable: bool,
+    platform: &crate::conf::Platform,
+) -> DWORD {
     if is_fullscreen {
         WS_POPUP | WS_SYSMENU | WS_VISIBLE
     } else {
+        if platform.no_decorations {
+            return WS_POPUP;
+        }
+
         let mut win_style: DWORD =
             WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 
@@ -590,19 +610,20 @@ unsafe extern "system" fn win32_wndproc(
         }
         WM_IME_COMPOSITION => {
             let flags = lparam as u32;
-            
+
             // Extract and dispatch the result string manually to avoid duplicates
             if (flags & GCS_RESULTSTR) != 0 {
                 let himc = ImmGetContext(hwnd);
                 if !himc.is_null() {
-                    let len = ImmGetCompositionStringW(himc, GCS_RESULTSTR, std::ptr::null_mut(), 0);
+                    let len =
+                        ImmGetCompositionStringW(himc, GCS_RESULTSTR, std::ptr::null_mut(), 0);
                     if len > 0 {
                         let mut buffer: Vec<u16> = vec![0; (len as usize / 2) + 1];
                         let actual_len = ImmGetCompositionStringW(
-                            himc, 
-                            GCS_RESULTSTR, 
-                            buffer.as_mut_ptr() as *mut _, 
-                            len as u32
+                            himc,
+                            GCS_RESULTSTR,
+                            buffer.as_mut_ptr() as *mut _,
+                            len as u32,
                         );
                         if actual_len > 0 {
                             let char_count = actual_len as usize / 2;
@@ -620,47 +641,60 @@ unsafe extern "system" fn win32_wndproc(
                 }
                 return 0;
             }
-            
+
             // For non-result messages (composition state updates), pass to DefWindowProc
             return DefWindowProcW(hwnd, umsg, wparam, lparam);
         }
         WM_IME_SETCONTEXT => {
-            let user_disabled = IME_USER_DISABLED.load(std::sync::atomic::Ordering::Relaxed);
-            
+            let user_disabled = IME_USER_DISABLED.load(Relaxed);
+
             // If user explicitly disabled IME, don't auto-restore
             if user_disabled {
                 return 0;
             }
-            
+
             // Must pass to DefWindowProc to enable IME properly
             return DefWindowProcW(hwnd, umsg, wparam, lparam);
         }
         WM_IME_STARTCOMPOSITION => {
             // Offset for candidate window below composition position
             const CANDIDATE_WINDOW_Y_OFFSET: i32 = 20;
-            
+
             // Set candidate window position when IME starts composition
             let himc = ImmGetContext(hwnd);
             if !himc.is_null() {
                 let mut pt: POINT = std::mem::zeroed();
                 GetCaretPos(&mut pt);
-                
+
                 let comp_form = COMPOSITIONFORM {
                     dwStyle: CFS_POINT,
                     ptCurrentPos: pt,
-                    rcArea: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+                    rcArea: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
                 };
                 ImmSetCompositionWindow(himc, &comp_form);
-                
+
                 // Set candidate window position (most IMEs only use index 0)
                 let cand_form = CANDIDATEFORM {
                     dwIndex: 0,
                     dwStyle: CFS_CANDIDATEPOS,
-                    ptCurrentPos: POINT { x: pt.x, y: pt.y + CANDIDATE_WINDOW_Y_OFFSET },
-                    rcArea: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+                    ptCurrentPos: POINT {
+                        x: pt.x,
+                        y: pt.y + CANDIDATE_WINDOW_Y_OFFSET,
+                    },
+                    rcArea: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
                 };
                 ImmSetCandidateWindow(himc, &cand_form);
-                
+
                 ImmReleaseContext(hwnd, himc);
             }
             return DefWindowProcW(hwnd, umsg, wparam, lparam);
@@ -670,20 +704,20 @@ unsafe extern "system" fn win32_wndproc(
         }
         WM_IME_NOTIFY => {
             const IMN_SETOPENSTATUS: WPARAM = 0x0008;
-            
+
             // Re-enable IME if it was unexpectedly closed (unless user disabled it)
             if wparam == IMN_SETOPENSTATUS {
                 let himc = ImmGetContext(hwnd);
                 if !himc.is_null() {
                     let open_status = ImmGetOpenStatus(himc);
-                    let user_disabled = IME_USER_DISABLED.load(std::sync::atomic::Ordering::Relaxed);
+                    let user_disabled = IME_USER_DISABLED.load(Relaxed);
                     if open_status == 0 && !user_disabled {
                         ImmSetOpenStatus(himc, 1);
                     }
                     ImmReleaseContext(hwnd, himc);
                 }
             }
-            
+
             return DefWindowProcW(hwnd, umsg, wparam, lparam);
         }
         WM_INPUTLANGCHANGEREQUEST | WM_INPUTLANGCHANGE => {
@@ -768,12 +802,12 @@ unsafe extern "system" fn win32_wndproc(
             }
         }
         WM_SETFOCUS => {
-            let user_disabled = IME_USER_DISABLED.load(std::sync::atomic::Ordering::Relaxed);
-            
+            let user_disabled = IME_USER_DISABLED.load(Relaxed);
+
             // Ensure IME context is available when window gains focus
             if !user_disabled {
                 let himc = ImmGetContext(hwnd);
-                
+
                 if himc.is_null() {
                     // Create new IME context if none exists
                     let new_himc = ImmCreateContext();
@@ -793,7 +827,7 @@ unsafe extern "system" fn win32_wndproc(
                     ImmReleaseContext(hwnd, himc);
                 }
             }
-            
+
             return DefWindowProcW(hwnd, umsg, wparam, lparam);
         }
         WM_KILLFOCUS => {
@@ -897,23 +931,41 @@ unsafe fn create_window(
     resizable: bool,
     width: i32,
     height: i32,
+    conf: &crate::conf::Platform,
 ) -> (HWND, HDC) {
     let mut wndclassw: WNDCLASSW = std::mem::zeroed();
 
     // CS_OWNDC is required for OpenGL
     wndclassw.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+
     wndclassw.lpfnWndProc = Some(win32_wndproc);
     wndclassw.hInstance = GetModuleHandleW(NULL as _);
     wndclassw.hCursor = LoadCursorW(NULL as _, IDC_ARROW);
     wndclassw.hIcon = LoadIconW(NULL as _, IDI_WINLOGO);
     wndclassw.hbrBackground = GetStockObject(BLACK_BRUSH as i32) as HBRUSH;
-    let class_name = "MINIQUADAPP\0".encode_utf16().collect::<Vec<u16>>();
+    let class_name = format!("MINIQUADAPP\0")
+        .encode_utf16()
+        .collect::<Vec<u16>>();
     wndclassw.lpszClassName = class_name.as_ptr() as _;
     wndclassw.cbWndExtra = std::mem::size_of::<*mut std::ffi::c_void>() as i32;
     RegisterClassW(&wndclassw);
 
-    let win_style: DWORD;
-    let win_ex_style: DWORD = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+    let mut win_style: DWORD;
+
+    let mut win_ex_style: DWORD = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+
+    if conf.framebuffer_alpha {
+        win_ex_style |= WS_EX_TRANSPARENT;
+    }
+
+    if conf.always_on_top {
+        win_ex_style |= WS_EX_TOPMOST;
+    }
+
+    if conf.tool_window {
+        win_ex_style |= WS_EX_TOOLWINDOW;
+    }
+
     let mut rect = RECT {
         left: 0,
         top: 0,
@@ -921,31 +973,57 @@ unsafe fn create_window(
         bottom: 0,
     };
 
+    // if fullscreen {
+    //     win_style = WS_POPUP | WS_SYSMENU | WS_VISIBLE;
+    //     rect.right = GetSystemMetrics(SM_CXSCREEN);
+    //     rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+    // } else {
+    //     win_style = if resizable {
+    //         WS_CLIPSIBLINGS
+    //             | WS_CLIPCHILDREN
+    //             | WS_CAPTION
+    //             | WS_SYSMENU
+    //             | WS_MINIMIZEBOX
+    //             | WS_MAXIMIZEBOX
+    //             | WS_SIZEBOX
+    //     } else {
+    //         WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+    //     };
+
+    //     rect.right = width;
+    //     rect.bottom = height;
+    // }
+
+    win_style = get_win_style(fullscreen, resizable, conf);
+
     if fullscreen {
-        win_style = WS_POPUP | WS_SYSMENU | WS_VISIBLE;
         rect.right = GetSystemMetrics(SM_CXSCREEN);
         rect.bottom = GetSystemMetrics(SM_CYSCREEN);
     } else {
-        win_style = if resizable {
-            WS_CLIPSIBLINGS
-                | WS_CLIPCHILDREN
-                | WS_CAPTION
-                | WS_SYSMENU
-                | WS_MINIMIZEBOX
-                | WS_MAXIMIZEBOX
-                | WS_SIZEBOX
-        } else {
-            WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
-        };
-
         rect.right = width;
         rect.bottom = height;
     }
 
+    // if fullscreen {
+    //     win_style |= WS_POPUP | WS_SYSMENU | WS_VISIBLE;
+
+    //     rect.right = GetSystemMetrics(SM_CXSCREEN);
+    //     rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+    // } else if conf.no_decorations {
+    //     win_style = WS_POPUP;
+    // } else {
+    //     win_style |= WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    //     if resizable {
+    //         win_style |= WS_MAXIMIZEBOX | WS_THICKFRAME | WS_SIZEBOX;
+    //     }
+    // }
+
     AdjustWindowRectEx(&rect as *const _ as _, win_style, false as _, win_ex_style);
     let win_width = rect.right - rect.left;
     let win_height = rect.bottom - rect.top;
-    let class_name = "MINIQUADAPP\0".encode_utf16().collect::<Vec<u16>>();
+    let class_name = format!("MINIQUADAPP\0")
+        .encode_utf16()
+        .collect::<Vec<u16>>();
     let mut window_name = window_title.encode_utf16().collect::<Vec<u16>>();
     window_name.push(0);
     let hwnd = CreateWindowExW(
@@ -962,6 +1040,31 @@ unsafe fn create_window(
         GetModuleHandleW(NULL as _), // hInstance
         NULL as _,                   // lparam
     );
+
+    //TODO: Check if win 8
+    if conf.framebuffer_alpha {
+        let region: HRGN = CreateRectRgn(0, 0, -1, -1);
+        let mut blur_behind: DWM_BLURBEHIND = std::mem::zeroed();
+        blur_behind.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+        blur_behind.hRgnBlur = region;
+        blur_behind.fEnable = TRUE;
+
+        DwmEnableBlurBehindWindow(hwnd, &blur_behind);
+        DeleteObject(region as *mut _);
+    }
+
+    if conf.mouse_passthrough {
+        let key: COLORREF = 0;
+        let alpha: u8 = 0;
+        let flags: u32 = 0;
+
+        let mut style = GetWindowLongA(hwnd, GWL_EXSTYLE);
+        style |= WS_EX_LAYERED as i32;
+        SetWindowLongA(hwnd, GWL_EXSTYLE, style);
+
+        SetLayeredWindowAttributes(hwnd, key, alpha, flags);
+    }
+
     assert!(!hwnd.is_null());
 
     // NOTE: Do not call ShowWindow here!
@@ -978,14 +1081,14 @@ unsafe fn create_window(
 unsafe fn create_msg_window() -> (HWND, HDC) {
     // Use a separate window class to avoid interfering with main window's IME
     let class_name = "MINIQUADMSGWND\0".encode_utf16().collect::<Vec<u16>>();
-    
+
     let mut wndclassw: WNDCLASSW = std::mem::zeroed();
     wndclassw.style = 0;
     wndclassw.lpfnWndProc = Some(DefWindowProcW);
     wndclassw.hInstance = GetModuleHandleW(NULL as _);
     wndclassw.lpszClassName = class_name.as_ptr() as _;
     RegisterClassW(&wndclassw);
-    
+
     let window_name = "miniquad message window\0"
         .encode_utf16()
         .collect::<Vec<u16>>();
@@ -1007,10 +1110,10 @@ unsafe fn create_msg_window() -> (HWND, HDC) {
         !msg_hwnd.is_null(),
         "Win32: failed to create helper window!"
     );
-    
+
     // Disable IME for message window to avoid interfering with main window
     ImmAssociateContextEx(msg_hwnd, std::ptr::null_mut(), IACE_CHILDREN);
-    
+
     ShowWindow(msg_hwnd, SW_HIDE);
     let mut msg = std::mem::zeroed();
     while PeekMessageW(&mut msg as _, msg_hwnd, 0, 0, PM_REMOVE) != 0 {
@@ -1135,9 +1238,9 @@ impl WindowsDisplay {
             ShowKeyboard(show) => {
                 // On Windows, ShowKeyboard controls IME state
                 if show {
-                    IME_USER_DISABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+                    IME_USER_DISABLED.store(false, Relaxed);
                 } else {
-                    IME_USER_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+                    IME_USER_DISABLED.store(true, Relaxed);
                 }
             }
             SetImePosition { x, y } => {
@@ -1164,6 +1267,7 @@ where
             conf.window_resizable,
             conf.window_width as _,
             conf.window_height as _,
+            &conf.platform,
         );
         if let Some(icon) = &conf.icon {
             set_icon(wnd, icon);
@@ -1194,6 +1298,7 @@ where
             event_handler: None,
             modal_resizing_timer: 0,
             update_requested: true,
+            platform: conf.platform,
         };
         display.init_dpi(conf.high_dpi);
 

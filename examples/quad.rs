@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use miniquad::*;
 
 #[repr(C)]
@@ -96,7 +98,11 @@ impl EventHandler for Stage {
     fn draw(&mut self) {
         let t = date::now();
 
-        self.ctx.begin_default_pass(Default::default());
+        self.ctx.begin_default_pass(PassAction::Clear {
+            color: Some((0., 0., 0., 0.)),
+            depth: None,
+            stencil: None,
+        });
 
         self.ctx.apply_pipeline(&self.pipeline);
         self.ctx.apply_bindings(&self.bindings);
@@ -117,6 +123,7 @@ impl EventHandler for Stage {
 
 fn main() {
     let mut conf = conf::Conf::default();
+    conf.platform.framebuffer_alpha = true;
     let metal = std::env::args().nth(1).as_deref() == Some("metal");
     conf.platform.apple_gfx_api = if metal {
         conf::AppleGfxApi::Metal
@@ -175,7 +182,7 @@ mod shader {
     };
 
     vertex RasterizerData vertexShader(
-      Vertex v [[stage_in]], 
+      Vertex v [[stage_in]],
       constant Uniforms& uniforms [[buffer(0)]])
     {
         RasterizerData out;

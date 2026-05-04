@@ -95,7 +95,8 @@ static NATIVE_DISPLAY: OnceLock<Mutex<native::NativeDisplayData>> = OnceLock::ne
 fn set_display(display: native::NativeDisplayData) {
     NATIVE_DISPLAY
         .set(Mutex::new(display))
-        .unwrap_or_else(|_| panic!("NATIVE_DISPLAY already set"));
+        .unwrap_or_else(|_| println!("NATIVE_DISPLAY already set"));
+    // .unwrap_or_else(|_| panic!("NATIVE_DISPLAY already set"));
 }
 /// This for now is Android specific since the process can continue running but the display
 /// is restarted. We support reinitializing the display.

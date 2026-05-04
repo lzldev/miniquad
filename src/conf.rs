@@ -167,6 +167,12 @@ pub struct Platform {
     /// - TODO: Document(and check) what does it actually mean on android. Transparent window?
     pub framebuffer_alpha: bool,
 
+    pub mouse_passthrough: bool,
+
+    pub always_on_top: bool,
+    pub no_decorations: bool,
+    pub tool_window: bool,
+
     /// On Wayland, specifies how to draw client-side decoration (CSD) if server-side decoration (SSD) is
     /// not supported (e.g., on GNOME).
     pub wayland_decorations: WaylandDecorations,
@@ -197,6 +203,10 @@ impl Default for Platform {
             wayland_decorations: WaylandDecorations::default(),
             linux_wm_class: "miniquad-application",
             android_panic_hook: true,
+            always_on_top: false,
+            mouse_passthrough: false,
+            no_decorations: false,
+            tool_window: false,
         }
     }
 }
