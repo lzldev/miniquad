@@ -923,10 +923,15 @@ gl_loader!(
     //Additional Line
     fn glLineWidth(width: GLfloat) -> (),
     fn glHint(hint: GLenum,value: GLenum) -> (),
-    //Additional OpenGL 4.3 Computer Shader functions
+
+    //Additional OpenGL 4.3 for Compute Shaders and SSBO
     fn glDispatchCompute(num_groups_x: GLuint, num_groups_y: GLuint, num_groups_z: GLuint) -> (),
     fn glMemoryBarrier( barriers: GLbitfield) -> (),
-    fn glBindBufferBase(target: GLenum, index: GLuint, buffer: GLuint) -> ()
+    fn glBindBufferBase(target: GLenum, index: GLuint, buffer: GLuint) -> (),
+    fn glBindBufferRange(target: GLenum, index: GLuint, buffer: GLuint, offset: GLintptr, size: GLsizeiptr) -> (),
+    fn glMapBufferRange(target: GLenum, offset: GLintptr, length: GLsizeiptr, access: GLbitfield) -> (),
+    fn glUnmapBuffer(target: GLenum) -> (),
+    fn glGetIntegeri_v(target: GLenum, index: GLuint, data: *mut GLint) -> ()
 );
 
 // note that glGetString only works after first glSwapBuffer,
