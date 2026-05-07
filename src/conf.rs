@@ -173,6 +173,8 @@ pub struct Platform {
     pub no_decorations: bool,
     pub tool_window: bool,
 
+    pub request_vesion: Option<(u32, u32)>,
+
     /// On Wayland, specifies how to draw client-side decoration (CSD) if server-side decoration (SSD) is
     /// not supported (e.g., on GNOME).
     pub wayland_decorations: WaylandDecorations,
@@ -207,6 +209,7 @@ impl Default for Platform {
             mouse_passthrough: false,
             no_decorations: false,
             tool_window: false,
+            request_vesion: None,
         }
     }
 }

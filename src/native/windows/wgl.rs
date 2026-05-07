@@ -379,6 +379,7 @@ impl Wgl {
         display: &mut WindowsDisplay,
         sample_count: i32,
         swap_interval: i32,
+        version: Option<(u32, u32)>,
     ) -> HGLRC {
         let pixel_format = self.wgl_find_pixel_format(display, sample_count);
         if 0 == pixel_format {
@@ -404,15 +405,17 @@ impl Wgl {
             panic!("WGL: ARB_create_context_profile required!");
         }
 
+        let (major, minor) = version.unwrap_or_else(|| (3, 1));
+
         // CreateContextAttribsARB is supposed to create the context with
         // the highest version version possible
         // but, somehow, sometimes, it creates 2.1 context when 3.1 is in fact available
         // so this is a workaround: try to create 3.1, and if it fails, go for 2.1
         let attrs = [
             WGL_CONTEXT_MAJOR_VERSION_ARB,
-            3,
+            major,
             WGL_CONTEXT_MINOR_VERSION_ARB,
-            1,
+            minor,
             WGL_CONTEXT_FLAGS_ARB,
             WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
             WGL_CONTEXT_PROFILE_MASK_ARB,

@@ -101,6 +101,9 @@ pub const GL_SRC_COLOR: u32 = 0x0300;
 pub const GL_BYTE: u32 = 0x1400;
 pub const GL_TEXTURE_CUBE_MAP_NEGATIVE_Z: u32 = 0x851A;
 pub const GL_LINE_STRIP: u32 = 0x0003;
+pub const GL_LINE_SMOOTH: u32 = 0x0B20;
+pub const GL_LINE_SMOOTH_HINT: u32 = 0x0C52;
+pub const GL_NICEST: u32 = 0x1102;
 pub const GL_TEXTURE_3D: u32 = 0x806F;
 pub const GL_CW: u32 = 0x0900;
 pub const GL_LINEAR: u32 = 0x2601;
@@ -337,6 +340,8 @@ macro_rules! gl_loader {
 }
 
 gl_loader!(
+    fn glLineWidth(width: GLfloat) -> (),
+    fn glHint(hint: GLenum,value: GLenum) -> (),
     fn glGetStringi(name: GLenum, index: GLuint) -> *const GLubyte,
     fn glGetString(name: GLenum) -> *const GLubyte,
     fn glFramebufferTextureLayer(
