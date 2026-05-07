@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 use miniquad::*;
 
@@ -23,6 +23,8 @@ struct Stage {
 impl Stage {
     pub fn new() -> Stage {
         let mut ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
+
+        println!("RENDERING CONTEXT:\n{:#?}", ctx.info());
 
         #[rustfmt::skip]
         let vertices: [Vertex; 4] = [
@@ -124,6 +126,7 @@ impl EventHandler for Stage {
 fn main() {
     let mut conf = conf::Conf::default();
     conf.platform.framebuffer_alpha = true;
+    conf.platform.request_vesion = Some((4, 3));
     let metal = std::env::args().nth(1).as_deref() == Some("metal");
     conf.platform.apple_gfx_api = if metal {
         conf::AppleGfxApi::Metal
