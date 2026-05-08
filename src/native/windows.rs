@@ -1083,14 +1083,14 @@ unsafe fn create_window(
             std::mem::size_of::<BOOL>() as u32,
         );
 
-        let mut backdrop = DWMSBT_AUTO;
+        // let mut backdrop = DWMSBT_AUTO;
 
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE as u32,
-            std::ptr::from_mut(&mut backdrop) as *mut _,
-            std::mem::size_of::<DWM_SYSTEMBACKDROP_TYPE>() as u32,
-        );
+        // DwmSetWindowAttribute(
+        //     hwnd,
+        //     DWMWA_SYSTEMBACKDROP_TYPE as u32,
+        //     std::ptr::from_mut(&mut backdrop) as *mut _,
+        //     std::mem::size_of::<DWM_SYSTEMBACKDROP_TYPE>() as u32,
+        // );
     }
 
     assert!(!hwnd.is_null());
