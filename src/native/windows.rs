@@ -13,14 +13,17 @@ use winapi::{
     shared::{
         hidusage::{HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC},
         minwindef::{
-            BYTE, DWORD, HIWORD, HRGN, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM,
+            BOOL, DWORD, HIWORD, HRGN, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM,
         },
         ntdef::NULL,
         windef::{COLORREF, HBRUSH, HCURSOR, HDC, HICON, HWND, POINT, RECT},
         windowsx::{GET_X_LPARAM, GET_Y_LPARAM},
     },
     um::{
-        dwmapi::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND},
+        dwmapi::{
+            DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BB_BLURREGION, DWM_BB_ENABLE,
+            DWM_BLURBEHIND,
+        },
         imm::{ImmGetContext, ImmReleaseContext, HIMC},
         libloaderapi::{GetModuleHandleW, GetProcAddress},
         shellapi::{DragAcceptFiles, DragQueryFileW, HDROP},
@@ -1063,6 +1066,31 @@ unsafe fn create_window(
         SetWindowLongA(hwnd, GWL_EXSTYLE, style);
 
         SetLayeredWindowAttributes(hwnd, key, alpha, flags);
+    }
+
+    if conf.use_dark_mode {
+        #[allow(non_camel_case_types)]
+        type DWM_SYSTEMBACKDROP_TYPE = u32;
+        const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38u32;
+        const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20u32;
+        const DWMSBT_AUTO: u32 = 0u32;
+
+        let mut dark = TRUE;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            std::ptr::from_mut(&mut dark) as *mut _,
+            std::mem::size_of::<BOOL>() as u32,
+        );
+
+        let mut backdrop = DWMSBT_AUTO;
+
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            std::ptr::from_mut(&mut backdrop) as *mut _,
+            std::mem::size_of::<DWM_SYSTEMBACKDROP_TYPE>() as u32,
+        );
     }
 
     assert!(!hwnd.is_null());

@@ -167,6 +167,11 @@ pub struct Platform {
     /// - TODO: Document(and check) what does it actually mean on android. Transparent window?
     pub framebuffer_alpha: bool,
 
+    /// Use the mica material in Windows 11
+    ///
+    /// https://learn.microsoft.com/en-us/windows/apps/design/style/mica
+    pub use_dark_mode: bool,
+
     pub mouse_passthrough: bool,
 
     pub always_on_top: bool,
@@ -201,6 +206,7 @@ impl Default for Platform {
             blocking_event_loop: false,
             sleep_interval_ms: None,
             swap_interval: None,
+            use_dark_mode: false,
             framebuffer_alpha: false,
             wayland_decorations: WaylandDecorations::default(),
             linux_wm_class: "miniquad-application",
